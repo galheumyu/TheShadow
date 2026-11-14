@@ -3,10 +3,11 @@
 [ext_resource type="Script" uid="uid://b1vq6uh5nmdw3" path="res://ParticleWall.gd" id="1_script"]
 [ext_resource type="PackedScene" uid="uid://c8iu2u8xoubx5" path="res://ParticleField/ParticleField.tscn" id="2_field"]
 [ext_resource type="Texture2D" uid="uid://brxpkv0d637ar" path="res://HoleMask/circle_soft.png" id="2_h2yge"]
+[ext_resource type="Script" uid="uid://cyacflp46yiqw" path="res://HandTracking/scripts/distance_receiver.gd" id="4_1bvp3"]
 
 [sub_resource type="Environment" id="Environment_wall"]
 background_mode = 1
-background_color = Color(0.3875138, 0.22254139, 0.41668928, 1)
+background_color = Color(0.21950102, 0.21950102, 0.21950102, 1)
 ambient_light_source = 1
 ambient_light_color = Color(1, 1, 1, 1)
 ambient_light_energy = 0.0
@@ -30,3 +31,6 @@ fov = 42.0
 environment = SubResource("Environment_wall")
 
 [node name="ParticleField" parent="." unique_id=39570880 instance=ExtResource("2_field")]
+
+[node name="HandDistanceReceiver" type="Node" parent="." unique_id=480294141]
+script = ExtResource("4_1bvp3")

@@ -14,7 +14,11 @@ const WALL_ASPECT_RATIO := 12.0 / 7.0
 @export var image_mask_rounds: Array[Texture2D] = []
 
 @onready var _field: ParticleField = $ParticleField
+@onready var _hand_receiver = $HandDistanceReceiver
 
+# 开启：用双手距离控制颜色；关闭：恢复原来的匹配进度颜色。
+# Enable: Use the distance between your hands to control the color; Disable: Restore the original color used for the matching progress.
+@export var use_hand_color: bool = true
 var _state: GameState = GameState.INTRO
 var _shape_index := 0
 var _time_remaining := ROUND_DURATION
@@ -38,16 +42,18 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	if use_hand_color:
+		_update_particle_color(0.0)
 	if _state == GameState.PLAYING:
 		_time_remaining = maxf(_time_remaining - delta, 0.0)
 		if _match_held:
 			_match_elapsed += delta
-			_field.set_match_score(_match_elapsed / MATCH_HOLD_DURATION)
+			_update_particle_color(_match_elapsed / MATCH_HOLD_DURATION)
 			if _match_elapsed >= MATCH_HOLD_DURATION:
 				_finish_round(true)
 		else:
 			_match_elapsed = 0.0
-			_field.set_match_score(0.0)
+			_update_particle_color(0.0)
 
 		if _state == GameState.PLAYING and _time_remaining <= 0.0:
 			_finish_round(false)
@@ -101,7 +107,7 @@ func _start_round() -> void:
 	_match_elapsed = 0.0
 	_transition_elapsed = 0.0
 	_match_held = false
-	_field.set_match_score(0.0)
+	_update_particle_color(0.0)
 	_apply_target_shape()
 
 
@@ -110,11 +116,11 @@ func _finish_round(success: bool) -> void:
 	_transition_elapsed = 0.0
 	if success:
 		_state = GameState.ROUND_SUCCESS
-		_field.set_match_score(1.0)
+		_update_particle_color(1.0)
 	else:
 		_state = GameState.ROUND_FAILED
 		_match_elapsed = 0.0
-		_field.set_match_score(0.0)
+		_update_particle_color(0.0)
 
 
 func _apply_target_shape() -> void:
@@ -261,3 +267,9 @@ func _update_hud() -> void:
 			_message_label.text = "All shapes matched!"
 			_prompt_label.text = "Press ENTER to play again"
 			_timer_label.text = ""
+
+func _update_particle_color(match_score: float) -> void:
+	if use_hand_color:
+		_field.set_match_score(_hand_receiver.proximity)
+	else:
+		_field.set_match_score(match_score)

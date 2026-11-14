@@ -1,3 +1,7 @@
+# Team setup / Windows launchers
+
+See [QUICKSTART.md](QUICKSTART.md). Run start_camera.bat for automatic local environment setup. The original shadow folder is not required.
+
 # 双手距离 → Godot 粒子变色
 
 这是独立的 Godot 4 项目。摄像头识别两只真实手的掌心位置，计算二维间距，通过本机 UDP 4242 发给 Godot。无需 Arduino。距离不是厘米，也不能区分前后深度。
