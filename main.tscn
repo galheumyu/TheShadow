@@ -1,11 +1,12 @@
-[gd_scene load_steps=3 format=3 uid="uid://bqparticlewall01"]
+[gd_scene format=3 uid="uid://f3fkytfks1bw"]
 
-[ext_resource type="Script" path="res://ParticleWall.gd" id="1_script"]
-[ext_resource type="PackedScene" path="res://ParticleField/ParticleField.tscn" id="2_field"]
+[ext_resource type="Script" uid="uid://b1vq6uh5nmdw3" path="res://ParticleWall.gd" id="1_script"]
+[ext_resource type="PackedScene" uid="uid://c8iu2u8xoubx5" path="res://ParticleField/ParticleField.tscn" id="2_field"]
+[ext_resource type="Texture2D" uid="uid://brxpkv0d637ar" path="res://HoleMask/circle_soft.png" id="2_h2yge"]
 
 [sub_resource type="Environment" id="Environment_wall"]
 background_mode = 1
-background_color = Color(0, 0, 0, 1)
+background_color = Color(0.3875138, 0.22254139, 0.41668928, 1)
 ambient_light_source = 1
 ambient_light_color = Color(1, 1, 1, 1)
 ambient_light_energy = 0.0
@@ -15,17 +16,17 @@ glow_normalized = true
 glow_intensity = 0.55
 glow_strength = 0.85
 glow_bloom = 0.2
-glow_blend_mode = 1
 
-[node name="ParticleWall" type="Node3D"]
+[node name="ParticleWall" type="Node3D" unique_id=984364063]
 script = ExtResource("1_script")
+image_mask_rounds = Array[Texture2D]([ExtResource("2_h2yge")])
 
-[node name="Camera3D" type="Camera3D" parent="."]
+[node name="Camera3D" type="Camera3D" parent="." unique_id=248790261]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 9)
 current = true
 fov = 42.0
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=443426791]
 environment = SubResource("Environment_wall")
 
-[node name="ParticleField" parent="." instance=ExtResource("2_field")]
+[node name="ParticleField" parent="." unique_id=39570880 instance=ExtResource("2_field")]

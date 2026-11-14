@@ -7,6 +7,11 @@ const ROUND_DURATION := 25.0
 const MATCH_HOLD_DURATION := 2.0
 const SUCCESS_PAUSE := 1.5
 const MASK_SIZE := 256
+const WALL_ASPECT_RATIO := 12.0 / 7.0
+
+@export_category("Shape Matching")
+## Optional image-mask rounds appended after the built-in rounds. Use an opaque 12:7 image with the shape in black and the background in white.
+@export var image_mask_rounds: Array[Texture2D] = []
 
 @onready var _field: ParticleField = $ParticleField
 
@@ -16,6 +21,7 @@ var _time_remaining := ROUND_DURATION
 var _match_elapsed := 0.0
 var _transition_elapsed := 0.0
 var _match_held := false
+var _valid_image_masks: Array[Texture2D] = []
 
 var _header_label: Label
 var _timer_label: Label
@@ -25,6 +31,7 @@ var _prompt_label: Label
 
 
 func _ready() -> void:
+	_collect_image_masks()
 	_build_hud()
 	_apply_target_shape()
 	_update_hud()
@@ -47,7 +54,7 @@ func _process(delta: float) -> void:
 	elif _state == GameState.ROUND_SUCCESS:
 		_transition_elapsed += delta
 		if _transition_elapsed >= SUCCESS_PAUSE:
-			if _shape_index == SHAPES.size() - 1:
+			if _shape_index == _round_count() - 1:
 				_state = GameState.COMPLETE
 			else:
 				_shape_index += 1
@@ -111,7 +118,36 @@ func _finish_round(success: bool) -> void:
 
 
 func _apply_target_shape() -> void:
-	_field.set_hole_mask(_create_hole_mask(SHAPES[_shape_index]))
+	if _shape_index < SHAPES.size():
+		_field.set_hole_mask(_create_hole_mask(SHAPES[_shape_index]))
+	else:
+		_field.set_hole_mask(_valid_image_masks[_shape_index - SHAPES.size()])
+
+
+func _collect_image_masks() -> void:
+	for index in range(image_mask_rounds.size()):
+		var mask := image_mask_rounds[index]
+		if mask == null:
+			push_error("Image-mask round %d has no texture assigned." % (index + 1))
+			continue
+		_valid_image_masks.append(mask)
+
+
+func _round_count() -> int:
+	return SHAPES.size() + _valid_image_masks.size()
+
+
+func _round_name(index: int) -> String:
+	if index < SHAPES.size():
+		return SHAPES[index]
+
+	var mask := _valid_image_masks[index - SHAPES.size()]
+	var mask_name := mask.resource_name
+	if mask_name.is_empty():
+		mask_name = mask.resource_path.get_file().get_basename()
+	if mask_name.is_empty():
+		mask_name = "IMAGE %d" % (index - SHAPES.size() + 1)
+	return mask_name.replace("_", " ").to_upper()
 
 
 func _create_hole_mask(shape_name: String) -> Texture2D:
@@ -133,13 +169,14 @@ func _create_hole_mask(shape_name: String) -> Texture2D:
 
 
 func _point_is_inside_shape(shape_name: String, x: float, y: float) -> bool:
+	var shape_x := x * WALL_ASPECT_RATIO
 	match shape_name:
 		"CIRCLE":
-			return Vector2(x, y).length_squared() <= 0.34 * 0.34
+			return Vector2(shape_x, y).length_squared() <= 0.34 * 0.34
 		"TRIANGLE":
-			return y >= -0.34 and y <= 0.34 and absf(x) <= (y + 0.34) * 0.5
+			return y >= -0.34 and y <= 0.34 and absf(shape_x) <= (y + 0.34) * 0.5
 		"SQUARE":
-			return absf(x) <= 0.31 and absf(y) <= 0.31
+			return absf(shape_x) <= 0.31 and absf(y) <= 0.31
 	return false
 
 
@@ -198,8 +235,8 @@ func _make_label(parent: Control, preset: Control.LayoutPreset, top: float, bott
 func _update_hud() -> void:
 	_header_label.text = "SHAPE MATCH  |  ROUND %d/%d  |  TARGET: %s" % [
 		_shape_index + 1,
-		SHAPES.size(),
-		SHAPES[_shape_index],
+		_round_count(),
+		_round_name(_shape_index),
 	]
 	_timer_label.text = "TIME  %02d" % ceili(_time_remaining)
 	_progress_bar.value = minf(_match_elapsed, MATCH_HOLD_DURATION)

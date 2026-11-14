@@ -40,7 +40,7 @@ shader_parameter/particle_tint = Vector3(0.35, 0.65, 1)
 shader_parameter/emission_strength = 2.2
 
 [sub_resource type="QuadMesh" id="QuadMesh_dot"]
-size = Vector2(0.12, 0.12)
+size = Vector2(0.14, 0.14)
 
 [node name="ParticleField" type="Node3D"]
 script = ExtResource("1_script")
@@ -49,7 +49,7 @@ hole_mask = ExtResource("5_mask")
 [node name="GPUParticles3D" type="GPUParticles3D" parent="."]
 material_override = SubResource("ShaderMaterial_dust")
 cast_shadow = 0
-amount = 5000
+amount = 10000
 lifetime = 5.0
 preprocess = 4.0
 randomness = 0.45
