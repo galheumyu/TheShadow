@@ -2,7 +2,7 @@ extends Node3D
 
 enum GameState { INTRO, PLAYING, ROUND_SUCCESS, ROUND_FAILED, COMPLETE }
 
-const SHAPES := ["CIRCLE", "TRIANGLE", "SQUARE"]
+const SHAPES := ["CIRCLE", "TRIANGLE", "SQUARE", "MOON"]
 const ROUND_DURATION := 25.0
 const MATCH_HOLD_DURATION := 2.0
 const SUCCESS_PAUSE := 1.5
@@ -177,6 +177,13 @@ func _point_is_inside_shape(shape_name: String, x: float, y: float) -> bool:
 			return y >= -0.34 and y <= 0.34 and absf(shape_x) <= (y + 0.34) * 0.5
 		"SQUARE":
 			return absf(shape_x) <= 0.31 and absf(y) <= 0.31
+		"MOON":
+			var centered_point := Vector2(shape_x, y)
+			var inner_circle_point := Vector2(shape_x - 0.14, y)
+			return (
+				centered_point.length_squared() <= 0.34 * 0.34
+				and inner_circle_point.length_squared() >= 0.30 * 0.30
+			)
 	return false
 
 
