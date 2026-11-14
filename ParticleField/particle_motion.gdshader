@@ -34,6 +34,15 @@ float next_rand(inout uint seed) {
 	return float(seed >> 16u) / 65535.0;
 }
 
+// Pass INDEX explicitly from start/process; do not access stage built-ins here.
+// Keep color timing tied to particle identity, independent of position and TIME.
+// INDEX also stays fixed after respawn, preventing periodic color jumps.
+// Preserve the size in CUSTOM.x and store the stable offset in CUSTOM.y.
+float stable_color_offset(uint particle_index) {
+	uint seed = particle_index * 747796405u + 2891336453u;
+	return next_rand(seed);
+}
+
 float mask_at(vec2 uv) {
 	if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
 		return 0.0;
@@ -116,7 +125,7 @@ void start() {
 	make_birth(uint(INDEX) * 747796405u + RANDOM_SEED + 2891336453u, pos, vel, sc, col);
 
 	VELOCITY = vel;
-	CUSTOM = vec4(sc, 0.0, 0.0, 0.0);
+	CUSTOM = vec4(sc, stable_color_offset(uint(INDEX)), 0.0, 0.0);
 	TRANSFORM = mat4(
 		vec4(sc, 0.0, 0.0, 0.0),
 		vec4(0.0, sc, 0.0, 0.0),
@@ -137,7 +146,7 @@ void process() {
 			pos, vel, sc, col
 		);
 		VELOCITY = vel;
-		CUSTOM = vec4(sc, 0.0, 0.0, 0.0);
+		CUSTOM = vec4(sc, stable_color_offset(uint(INDEX)), 0.0, 0.0);
 		TRANSFORM = mat4(
 			vec4(sc, 0.0, 0.0, 0.0),
 			vec4(0.0, sc, 0.0, 0.0),

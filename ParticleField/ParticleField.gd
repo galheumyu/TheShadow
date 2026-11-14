@@ -19,8 +19,15 @@ class_name ParticleField
 var _process_material: ShaderMaterial
 var _draw_material: ShaderMaterial
 
-const COLOR_COLD := Color(0.35, 0.65, 1.0, 1.0)
-const COLOR_WARM := Color(1.0, 0.82, 0.35, 1.0)
+## Lower saturation produces softer colors instead of vivid neon hues.
+@export_range(0.0, 1.0) var color_saturation: float = 0.5
+## Larger spread makes neighboring patches change at more different distances.
+@export_range(0.0, 0.8) var color_spread: float = 0.45
+## Smaller values make color changes slower; units are inverse seconds.
+@export_range(0.1, 10.0) var color_response_speed: float = 2.0
+var _color_target: float = 0.0
+var _color_progress: float = 0.0
+
 
 
 func _ready() -> void:
@@ -32,14 +39,18 @@ func _ready() -> void:
 	_update_visibility_aabb()
 
 
+# Receive a target only; smooth it once per frame, independent of call count.
 func set_match_score(score: float) -> void:
-	# Match score only drives color — not motion / forces.
-	var tint := COLOR_COLD.lerp(COLOR_WARM, clampf(score, 0.0, 1.0))
-	var tint_v := Vector3(tint.r, tint.g, tint.b)
-	if _process_material:
-		_process_material.set_shader_parameter("particle_tint", tint_v)
+	_color_target = clampf(score, 0.0, 1.0)
+
+
+func _process(delta: float) -> void:
+	# A slower response prevents camera noise from rapidly sweeping the hue wheel.
+	_color_progress = lerpf(_color_progress, _color_target, 1.0 - exp(-color_response_speed * delta))
 	if _draw_material:
-		_draw_material.set_shader_parameter("particle_tint", tint_v)
+		_draw_material.set_shader_parameter("color_progress", _color_progress)
+		_draw_material.set_shader_parameter("color_saturation", color_saturation)
+		_draw_material.set_shader_parameter("color_spread", color_spread)
 
 
 func set_hole_mask(texture: Texture2D) -> void:
