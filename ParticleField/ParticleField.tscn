@@ -1,0 +1,59 @@
+[gd_scene load_steps=8 format=3 uid="uid://c8iu2u8xoubx5"]
+
+[ext_resource type="Script" path="res://ParticleField/ParticleField.gd" id="1_script"]
+[ext_resource type="Shader" path="res://ParticleField/particle_dust.gdshader" id="2_draw"]
+[ext_resource type="Shader" path="res://ParticleField/particle_motion.gdshader" id="3_motion"]
+[ext_resource type="Texture2D" path="res://ParticleField/soft_dot.png" id="4_dot"]
+[ext_resource type="Texture2D" path="res://HoleMask/circle_soft.png" id="5_mask"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_motion"]
+shader = ExtResource("3_motion")
+shader_parameter/hole_mask = ExtResource("5_mask")
+shader_parameter/wall_half_extents = Vector2(6, 3.5)
+shader_parameter/particle_tint = Vector3(0.35, 0.65, 1)
+shader_parameter/base_speed_min = 0.12
+shader_parameter/base_speed_max = 0.35
+shader_parameter/turb_strength = 0.42
+shader_parameter/turb_scale = 1.35
+shader_parameter/turb_time_scale = 0.2
+shader_parameter/flow_blend = 1.2
+shader_parameter/fa_strength = 6.0
+shader_parameter/fv_strength = 1.0
+shader_parameter/tangent_speed = 0.28
+shader_parameter/hole_push_strength = 10.0
+shader_parameter/hole_keep_threshold = 0.55
+shader_parameter/hole_project_strength = 1.05
+shader_parameter/grad_weight_start = 0.6
+shader_parameter/grad_weight_end = 5.5
+shader_parameter/damping = 0.3
+shader_parameter/max_speed = 0.85
+shader_parameter/scale_min = 0.4
+shader_parameter/scale_max = 1.0
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_dust"]
+render_priority = 0
+shader = ExtResource("2_draw")
+shader_parameter/particle_tex = ExtResource("4_dot")
+shader_parameter/hole_mask = ExtResource("5_mask")
+shader_parameter/wall_half_extents = Vector2(6, 3.5)
+shader_parameter/particle_tint = Vector3(0.35, 0.65, 1)
+shader_parameter/emission_strength = 2.2
+
+[sub_resource type="QuadMesh" id="QuadMesh_dot"]
+size = Vector2(0.12, 0.12)
+
+[node name="ParticleField" type="Node3D"]
+script = ExtResource("1_script")
+hole_mask = ExtResource("5_mask")
+
+[node name="GPUParticles3D" type="GPUParticles3D" parent="."]
+material_override = SubResource("ShaderMaterial_dust")
+cast_shadow = 0
+amount = 5000
+lifetime = 5.0
+preprocess = 4.0
+randomness = 0.45
+visibility_aabb = AABB(-8, -5, -1, 16, 10, 2)
+local_coords = true
+process_material = SubResource("ShaderMaterial_motion")
+draw_pass_1 = SubResource("QuadMesh_dot")
