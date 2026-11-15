@@ -14,6 +14,7 @@ const WALL_ASPECT_RATIO := 12.0 / 7.0
 @export var image_mask_rounds: Array[Texture2D] = []
 
 @onready var _field: ParticleField = $ParticleField
+@onready var _link: VisionLink = $VisionLink
 
 var _state: GameState = GameState.INTRO
 var _shape_index := 0
@@ -21,6 +22,8 @@ var _time_remaining := ROUND_DURATION
 var _match_elapsed := 0.0
 var _transition_elapsed := 0.0
 var _match_held := false
+var _space_held := false
+var _last_shadow: Texture2D
 var _valid_image_masks: Array[Texture2D] = []
 
 var _header_label: Label
@@ -28,6 +31,7 @@ var _timer_label: Label
 var _message_label: Label
 var _progress_bar: ProgressBar
 var _prompt_label: Label
+var _calib_rect: ColorRect
 
 
 func _ready() -> void:
@@ -38,8 +42,10 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	_update_shadow_mask()
 	if _state == GameState.PLAYING:
 		_time_remaining = maxf(_time_remaining - delta, 0.0)
+		_match_held = _link.matched or _space_held
 		if _match_held:
 			_match_elapsed += delta
 			_field.set_match_score(_match_elapsed / MATCH_HOLD_DURATION)
@@ -68,10 +74,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	if event.keycode == KEY_SPACE:
-		if event.pressed and not event.echo and _state == GameState.PLAYING:
-			_match_held = true
-		elif not event.pressed:
-			_match_held = false
+		_space_held = event.pressed and not event.echo and _state == GameState.PLAYING
 		return
 
 	if not event.pressed or event.echo:
@@ -88,6 +91,33 @@ func _unhandled_input(event: InputEvent) -> void:
 					_start_game()
 		KEY_R:
 			_start_game()
+		KEY_C:
+			_toggle_calibration_screen()
+
+
+func _update_shadow_mask() -> void:
+	# Hand the newest shadow to the wall. Dropped when vision reports no valid frame,
+	# otherwise the last outline would stay on the wall forever.
+	var shadow: Texture2D = _link.shadow_texture if _link.valid else null
+	if shadow == _last_shadow:
+		return
+	_last_shadow = shadow
+	_field.set_shadow_mask(shadow)
+
+
+func _toggle_calibration_screen() -> void:
+	# Solid green screen for the vision calibration: a saturated color is easy to
+	# separate from a white wall, whatever the room light is.
+	if _calib_rect == null:
+		var layer := CanvasLayer.new()
+		layer.layer = 20
+		add_child(layer)
+		_calib_rect = ColorRect.new()
+		_calib_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		_calib_rect.color = Color(0.0, 1.0, 0.0)
+		_calib_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		layer.add_child(_calib_rect)
+	_calib_rect.visible = not _calib_rect.visible
 
 
 func _start_game() -> void:
@@ -118,10 +148,13 @@ func _finish_round(success: bool) -> void:
 
 
 func _apply_target_shape() -> void:
+	var mask: Texture2D
 	if _shape_index < SHAPES.size():
-		_field.set_hole_mask(_create_hole_mask(SHAPES[_shape_index]))
+		mask = _create_hole_mask(SHAPES[_shape_index])
 	else:
-		_field.set_hole_mask(_valid_image_masks[_shape_index - SHAPES.size()])
+		mask = _valid_image_masks[_shape_index - SHAPES.size()]
+	_field.set_hole_mask(mask)
+	_link.set_target(mask, _shape_index)
 
 
 func _collect_image_masks() -> void:
@@ -244,11 +277,11 @@ func _update_hud() -> void:
 	match _state:
 		GameState.INTRO:
 			_message_label.text = "Match your shadow to the glowing shape"
-			_prompt_label.text = "Press ENTER to begin  |  Prototype: hold SPACE to simulate a match"
+			_prompt_label.text = "Press ENTER to begin  |  SPACE = simulate  |  C = green screen"
 			_timer_label.text = ""
 		GameState.PLAYING:
 			_message_label.text = "Hold your shadow in the shape" if _match_held else "Move your shadow into the shape"
-			_prompt_label.text = "Hold SPACE to simulate a shadow match  |  R restart"
+			_prompt_label.text = "Move your shadow into the shape  |  SPACE = simulate  |  R restart"
 		GameState.ROUND_SUCCESS:
 			_message_label.text = "Shape matched!"
 			_prompt_label.text = "Next shape..."

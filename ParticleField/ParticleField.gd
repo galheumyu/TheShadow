@@ -14,6 +14,13 @@ class_name ParticleField
 		if is_node_ready():
 			_apply_shared_uniforms()
 
+## Shadow detected by the vision process; particles gather on its outline.
+var shadow_mask: Texture2D:
+	set(value):
+		shadow_mask = value
+		if is_node_ready():
+			_apply_shadow_mask()
+
 @onready var particles: GPUParticles3D = $GPUParticles3D
 
 var _process_material: ShaderMaterial
@@ -28,6 +35,7 @@ func _ready() -> void:
 	_draw_material = particles.material_override as ShaderMaterial
 	particles.emitting = true
 	_apply_shared_uniforms()
+	_apply_shadow_mask()
 	set_match_score(0.0)
 	_update_visibility_aabb()
 
@@ -44,6 +52,16 @@ func set_match_score(score: float) -> void:
 
 func set_hole_mask(texture: Texture2D) -> void:
 	hole_mask = texture
+
+
+func set_shadow_mask(texture: Texture2D) -> void:
+	shadow_mask = texture
+
+
+func _apply_shadow_mask() -> void:
+	# Only the motion shader reads it; the draw pass just renders the particles.
+	if _process_material:
+		_process_material.set_shader_parameter("shadow_mask", shadow_mask)
 
 
 func _apply_shared_uniforms() -> void:

@@ -3,6 +3,7 @@
 [ext_resource type="Script" uid="uid://b1vq6uh5nmdw3" path="res://ParticleWall.gd" id="1_script"]
 [ext_resource type="PackedScene" uid="uid://c8iu2u8xoubx5" path="res://ParticleField/ParticleField.tscn" id="2_field"]
 [ext_resource type="Texture2D" uid="uid://brxpkv0d637ar" path="res://HoleMask/circle_soft.png" id="2_h2yge"]
+[ext_resource type="Script" uid="uid://c1k31l34ehe03" path="res://VisionLink.gd" id="4_link"]
 
 [sub_resource type="Environment" id="Environment_wall"]
 background_mode = 1
@@ -30,3 +31,6 @@ fov = 42.0
 environment = SubResource("Environment_wall")
 
 [node name="ParticleField" parent="." unique_id=39570880 instance=ExtResource("2_field")]
+
+[node name="VisionLink" type="Node" parent="."]
+script = ExtResource("4_link")

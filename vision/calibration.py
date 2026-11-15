@@ -88,27 +88,17 @@ class Calibration:
         return cls(corners=corners, camera_size=(int(w), int(h)))
 
 
-def find_corners_auto(frame: np.ndarray, min_area_ratio: float = 0.05,
+def _quad_from_binary(binary: np.ndarray, what: str, min_area_ratio: float = 0.05,
                       border_margin: int = 2) -> Optional[np.ndarray]:
-    """Find the projected area (a plain white screen) in a camera frame.
-
-    Returns the 4 corners (TL, TR, BR, BL) or None. Fails if the bright area is too small,
-    is not a quadrilateral, or touches the frame border (then part of the projection is
-    probably outside the camera's view).
-    """
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
-    h, w = gray.shape
-    blurred = cv2.GaussianBlur(gray, (7, 7), 0)
-    _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
-    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+    """Largest quadrilateral in a binary mask, as 4 corners, or None."""
+    h, w = binary.shape
     contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
-        log.info("auto calibration: no bright area found")
+        log.info("auto calibration: no %s found", what)
         return None
     largest = max(contours, key=cv2.contourArea)
     if cv2.contourArea(largest) < min_area_ratio * w * h:
-        log.info("auto calibration: bright area is too small")
+        log.info("auto calibration: %s is too small", what)
         return None
     hull = cv2.convexHull(largest)
     perimeter = cv2.arcLength(hull, True)
@@ -121,14 +111,47 @@ def find_corners_auto(frame: np.ndarray, min_area_ratio: float = 0.05,
         if len(approx) < 4:
             break
     if quad is None:
-        log.info("auto calibration: bright area is not a quadrilateral")
+        log.info("auto calibration: %s is not a quadrilateral", what)
         return None
     near_border = ((quad[:, 0] < border_margin) | (quad[:, 0] > w - 1 - border_margin) |
                    (quad[:, 1] < border_margin) | (quad[:, 1] > h - 1 - border_margin))
     if near_border.any():
-        log.info("auto calibration: projected area touches the camera frame border")
+        log.info("auto calibration: %s touches the camera frame border", what)
         return None
     return order_corners(quad)
+
+
+def find_corners_auto(frame: np.ndarray, min_area_ratio: float = 0.05,
+                      border_margin: int = 2) -> Optional[np.ndarray]:
+    """Find the projected area (a plain white screen) in a camera frame.
+
+    Returns the 4 corners (TL, TR, BR, BL) or None. Fails if the bright area is too small,
+    is not a quadrilateral, or touches the frame border (then part of the projection is
+    probably outside the camera's view).
+    """
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+    blurred = cv2.GaussianBlur(gray, (7, 7), 0)
+    _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+    return _quad_from_binary(binary, "bright area", min_area_ratio, border_margin)
+
+
+def find_corners_auto_color(frame: np.ndarray, min_saturation: int = 100,
+                            min_value: int = 100, min_area_ratio: float = 0.05,
+                            border_margin: int = 2) -> Optional[np.ndarray]:
+    """Find a colored (saturated) projected area, e.g. the green calibration screen.
+
+    A colored screen is much easier to separate from a white wall lit by a lamp than a
+    white one: the wall has low saturation whatever its brightness is.
+    """
+    if frame.ndim != 3:
+        raise ValueError("color calibration needs a BGR frame")
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    mask = ((hsv[:, :, 1] >= min_saturation) & (hsv[:, :, 2] >= min_value)).astype(np.uint8) * 255
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    return _quad_from_binary(mask, "colored area", min_area_ratio, border_margin)
 
 
 def _draw_quad(img: np.ndarray, pts, color=(0, 255, 0)) -> None:
@@ -241,11 +264,12 @@ def calibrate(source: FrameSource, mode: str = "auto_then_manual", confirm: bool
               warmup_frames: int = 15) -> Optional[Calibration]:
     """Run calibration and return a Calibration, or None if it was cancelled or failed.
 
-    mode: "auto", "manual" or "auto_then_manual".
+    mode: "auto", "color", "manual" or "auto_then_manual".
     confirm: show the auto result and ask for confirmation (needs a display).
-    The projector must show a plain white full-screen image while calibrating.
+    The projector must show a plain white full-screen image ("auto") or a plain colored
+    one ("color"; the game shows green when you press C).
     """
-    if mode not in ("auto", "manual", "auto_then_manual"):
+    if mode not in ("auto", "color", "manual", "auto_then_manual"):
         raise ValueError("unknown calibration mode %r" % mode)
     frame = None
     for _ in range(warmup_frames):      # let exposure settle
@@ -256,7 +280,9 @@ def calibrate(source: FrameSource, mode: str = "auto_then_manual", confirm: bool
         raise RuntimeError("the camera produced no frames")
 
     corners = None
-    if mode in ("auto", "auto_then_manual"):
+    if mode == "color":
+        corners = find_corners_auto_color(frame)
+    elif mode in ("auto", "auto_then_manual"):
         corners = find_corners_auto(frame)
         if corners is not None and confirm and not confirm_corners(source, corners):
             corners = None

@@ -37,7 +37,15 @@ def parse_addr(text: str) -> Tuple[str, int]:
     return host, int(port)
 
 
-def build_source(spec: str, cfg: Config, shadow: str = "none", shift: float = 0.0) -> FrameSource:
+def parse_size(text: str) -> Tuple[int, int]:
+    w, _, h = text.lower().partition("x")
+    if not w.isdigit() or not h.isdigit():
+        raise argparse.ArgumentTypeError("expected WxH, got %r" % text)
+    return int(w), int(h)
+
+
+def build_source(spec: str, cfg: Config, shadow: str = "none", shift: float = 0.0,
+                 size: Optional[Tuple[int, int]] = None) -> FrameSource:
     if spec == "synthetic":
         src = SyntheticSource(screen_size=cfg.work_size)
         if shadow != "none":
@@ -46,7 +54,7 @@ def build_source(spec: str, cfg: Config, shadow: str = "none", shift: float = 0.
         return src
     if spec == "webcam" or spec.startswith("webcam:"):
         index = int(spec.split(":", 1)[1]) if ":" in spec else 0
-        return WebcamSource(index)
+        return WebcamSource(index, size)
     if spec.startswith("video:"):
         return VideoFileSource(spec[len("video:"):])
     raise SystemExit("unknown --source %r (use webcam[:N], video:PATH or synthetic)" % spec)
@@ -54,7 +62,7 @@ def build_source(spec: str, cfg: Config, shadow: str = "none", shift: float = 0.
 
 def cmd_calibrate(args: argparse.Namespace) -> int:
     cfg = Config()
-    source = build_source(args.source, cfg)
+    source = build_source(args.source, cfg, size=args.size)
     try:
         calib = calibrate(source, mode=args.mode, confirm=not args.no_confirm)
     finally:
@@ -76,7 +84,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     if args.threshold is not None:
         cfg.threshold = args.threshold
 
-    source = build_source(args.source, cfg, args.synthetic_shadow, args.synthetic_shift)
+    source = build_source(args.source, cfg, args.synthetic_shadow, args.synthetic_shift,
+                          args.size)
     calib: Optional[Calibration] = None
     if args.source == "synthetic" and not os.path.exists(args.calibration):
         # Demo convenience: calibrate against the synthetic white screen automatically.
@@ -134,8 +143,10 @@ def main(argv=None) -> int:
 
     p_cal = sub.add_parser("calibrate", help="calibrate camera -> projected screen")
     p_cal.add_argument("--source", default="webcam:0", help="webcam[:N], video:PATH or synthetic")
-    p_cal.add_argument("--mode", choices=("auto", "manual", "auto_then_manual"),
-                       default="auto_then_manual")
+    p_cal.add_argument("--mode", choices=("auto", "color", "manual", "auto_then_manual"),
+                       default="auto_then_manual",
+                       help="color = the game shows a plain green screen (press C in game)")
+    p_cal.add_argument("--size", type=parse_size, help="camera capture WxH, e.g. 1280x720")
     p_cal.add_argument("--out", default=cfg.calibration_path)
     p_cal.add_argument("--no-confirm", action="store_true",
                        help="accept the auto result without showing a window")
@@ -148,6 +159,8 @@ def main(argv=None) -> int:
     p_run.add_argument("--listen", type=parse_addr, help="HOST:PORT to receive from Godot")
     p_run.add_argument("--godot", type=parse_addr, help="HOST:PORT to send results to")
     p_run.add_argument("--threshold", type=int, help="shadow gray-level threshold")
+    p_run.add_argument("--size", type=parse_size,
+                       help="camera capture WxH; must match the resolution used to calibrate")
     p_run.add_argument("--synthetic-shadow", choices=("none",) + SHAPE_NAMES, default="none",
                        help="(synthetic source) shape the fake shadow has")
     p_run.add_argument("--synthetic-shift", type=float, default=0.0,

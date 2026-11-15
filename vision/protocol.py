@@ -16,7 +16,7 @@ vision -> Godot
     target_ack  {"type": "target_ack", "target_id": int|null, "ok": bool, "error": str}
     match       {"type": "match", "target_id": int|null, "frame_id": int, "t": float,
                  "iou": float, "iou_raw": float, "coverage": float, "overflow": float,
-                 "matched": bool, "valid": bool}
+                 "matched": bool, "valid": bool, "shadow_png_b64": str}
         Sent once per camera frame.
         iou       smoothed intersection-over-union of shadow and target
         iou_raw   unsmoothed IoU of this frame
@@ -25,6 +25,11 @@ vision -> Godot
         matched   iou passed the enter threshold (with hysteresis); Godot owns the hold timer
         valid     False if there is no calibration or no target yet; ignore the scores then
         target_id lets Godot discard results that belong to the previous round.
+        shadow_png_b64 is the shadow found in this frame, in projected-screen coordinates,
+        downscaled, as a PNG where the shadow is opaque and everything else is transparent.
+        Godot reads the alpha as a mask: Image.load_png_from_buffer() + ImageTexture, then
+        the particle shader pulls particles onto its contour.
+        It is missing when valid is false.
 """
 from __future__ import annotations
 
@@ -37,6 +42,8 @@ import numpy as np
 
 MAX_DATAGRAM = 60000      # stay below the 65507-byte UDP payload limit
 SHAPE_THRESHOLD = 128     # pixel values below this count as "shape"
+SHADOW_MAX_SIZE = (320, 180)   # sent shadow is downscaled to this: a full-size mask
+                               # does not compress well and can exceed the datagram size
 
 
 def encode_message(msg: Dict[str, Any]) -> bytes:
@@ -57,6 +64,26 @@ def mask_to_png_b64(shape_mask: np.ndarray) -> str:
     """Bool mask (True = shape) -> base64 PNG using the Godot convention (shape dark)."""
     gray = np.where(np.asarray(shape_mask, dtype=bool), 0, 255).astype(np.uint8)
     ok, buf = cv2.imencode(".png", gray)
+    if not ok:
+        raise ValueError("PNG encoding failed")
+    return base64.b64encode(buf.tobytes()).decode("ascii")
+
+
+def shadow_to_png_b64(shadow: np.ndarray, max_size: Tuple[int, int] = SHADOW_MAX_SIZE) -> str:
+    """Bool shadow mask -> base64 PNG, shadow opaque white, the rest transparent.
+
+    Downscaled to max_size (nearest) so the datagram stays small.
+    """
+    shadow = np.asarray(shadow, dtype=bool)
+    h, w = shadow.shape
+    scale = min(max_size[0] / w, max_size[1] / h)
+    if scale < 1.0:
+        shadow = cv2.resize(shadow.astype(np.uint8) * 255,
+                            (int(w * scale), int(h * scale)),
+                            interpolation=cv2.INTER_NEAREST) > 0
+    rgba = np.zeros((shadow.shape[0], shadow.shape[1], 4), dtype=np.uint8)
+    rgba[shadow] = 255                       # opaque where the shadow is
+    ok, buf = cv2.imencode(".png", rgba)
     if not ok:
         raise ValueError("PNG encoding failed")
     return base64.b64encode(buf.tobytes()).decode("ascii")
@@ -112,8 +139,9 @@ def make_ack(target_id: Optional[int], ok: bool, error: str = "") -> Dict[str, A
 
 
 def make_match(target_id: Optional[int], frame_id: int, t: float, iou: float, iou_raw: float,
-               coverage: float, overflow: float, matched: bool, valid: bool) -> Dict[str, Any]:
-    return {
+               coverage: float, overflow: float, matched: bool, valid: bool,
+               shadow: Optional[np.ndarray] = None) -> Dict[str, Any]:
+    msg = {
         "type": "match",
         "target_id": target_id,
         "frame_id": int(frame_id),
@@ -125,3 +153,6 @@ def make_match(target_id: Optional[int], frame_id: int, t: float, iou: float, io
         "matched": bool(matched),
         "valid": bool(valid),
     }
+    if shadow is not None:
+        msg["shadow_png_b64"] = shadow_to_png_b64(shadow)
+    return msg

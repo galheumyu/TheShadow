@@ -15,7 +15,7 @@ class Config:
     work_size: Tuple[int, int] = (640, 360)
 
     # Shadow segmentation (PLACEHOLDER values).
-    threshold: int = 60        # gray level below which a pixel counts as shadow
+    threshold: int = 150       # gray level below which a pixel counts as shadow
     blur_ksize: int = 5        # odd; 1 disables
     open_ksize: int = 5        # removes small specks
     close_ksize: int = 7       # fills small holes

@@ -1,6 +1,10 @@
+import base64
 import socket
 import time
 import unittest
+
+import cv2
+import numpy as np
 
 from vision.calibration import Calibration, find_corners_auto
 from vision.frame_source import SyntheticSource
@@ -65,6 +69,27 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(out.result["target_id"], 1)
         self.assertGreater(out.result["iou"], 0.9)
         self.assertTrue(out.result["matched"])
+
+    def test_match_carries_the_shadow_shape(self):
+        shadow = make_shape_mask("circle", WORK)
+        self.source.set_shadow(shadow)
+        pipeline = self.make_pipeline()
+        self.send_target(1, "circle")
+        out = self.step_until_target(pipeline)
+        raw = base64.b64decode(out.result["shadow_png_b64"])
+        img = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
+        expected = cv2.resize(out.shadow.astype(np.uint8) * 255, (320, 180),
+                              interpolation=cv2.INTER_NEAREST) > 0
+        self.assertTrue(np.array_equal(img[:, :, 3] > 0, expected))
+        self.assertGreater(np.count_nonzero(out.shadow & shadow) / np.count_nonzero(shadow), 0.9)
+
+    def test_no_shadow_png_when_invalid(self):
+        self.source.set_shadow(make_shape_mask("circle", WORK))
+        pipeline = self.make_pipeline(calibration=None)
+        self.send_target(1, "circle")
+        out = self.step_until_target(pipeline)
+        self.assertFalse(out.result["valid"])
+        self.assertNotIn("shadow_png_b64", out.result)
 
     def test_shifted_shadow_does_not_match(self):
         self.source.set_shadow(shift_mask(make_shape_mask("circle", WORK), 150, 0))

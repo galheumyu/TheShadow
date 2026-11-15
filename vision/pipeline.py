@@ -98,7 +98,7 @@ class VisionPipeline:
         scores = compute_scores(shadow, self.target_mask)
         iou_smoothed, matched = self.tracker.update(scores.iou)
         result = make_match(self.target_id, self.frame_id, t, iou_smoothed, scores.iou,
-                            scores.coverage, scores.overflow, matched, True)
+                            scores.coverage, scores.overflow, matched, True, shadow)
         self.transport.send(result)
         return StepResult(result, screen, shadow)
 

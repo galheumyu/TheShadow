@@ -16,6 +16,7 @@ class UdpTransport:
         self._sock.bind(listen_addr)
         self._sock.setblocking(False)
         self.godot_addr = godot_addr
+        self._send_failed = False
 
     @property
     def listen_port(self) -> int:
@@ -39,7 +40,13 @@ class UdpTransport:
         return messages
 
     def send(self, msg: Dict[str, Any]) -> None:
-        self._sock.sendto(encode_message(msg), self.godot_addr)
+        try:
+            self._sock.sendto(encode_message(msg), self.godot_addr)
+        except OSError as exc:
+            # A dropped frame is better than killing the process.
+            if not self._send_failed:
+                self._send_failed = True
+                log.warning("could not send %s message: %s", msg.get("type"), exc)
 
     def close(self) -> None:
         self._sock.close()
