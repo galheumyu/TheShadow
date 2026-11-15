@@ -17,7 +17,14 @@ Godot is not touched by this folder. `.gdignore` keeps Godot from scanning it.
 pip install -r vision/requirements.txt
 ```
 
-Run everything from the repository root.
+Run everything from the repository root. If `python` is not on PATH, use a virtual
+environment and call it explicitly:
+
+```
+python3 -m venv .venv
+.venv/bin/pip install -r vision/requirements.txt
+.venv/bin/python -m vision.main run --source webcam:0 --size 1280x720 --show
+```
 
 On macOS the program that runs vision needs camera permission (System Settings -> Privacy &
 Security -> Camera); restart it after granting, or capture fails with "not authorized".
@@ -97,7 +104,9 @@ Vision -> Godot:
  "shadow_png_b64": "<base64 PNG>"}
 ```
 - `shadow_png_b64` is the shadow found in that frame (screen coordinates, downscaled to at
-  most 320x180), as a PNG where the shadow is opaque and everything else transparent.
+  most 320x180 and grown by `SHADOW_DILATE_PX`), as a PNG where the shadow is opaque and
+  everything else transparent. The dilation moves the outline the particles gather on out
+  of the dark edge and into the lit area; raise it if the ring still sits in the shadow.
   Sending it at working resolution made datagrams too large: a shadow is a jagged blob and
   compresses badly. Godot reads the alpha channel as a mask. Load it with
   `Image.load_png_from_buffer()` then `ImageTexture.create_from_image()`, or
@@ -137,6 +146,32 @@ The mask is sampled with wall UV, not screen UV. The wall fills almost the whole
 image, so this is off by a couple of percent; it would need a proper mapping if the wall and
 the projection ever differ more than that.
 
+### Score API
+
+Any other script can read the similarity score from the `VisionLink` node (child of the
+scene root):
+
+| Member | Type | Meaning |
+|---|---|---|
+| `iou` | `float` | smoothed similarity, 0..1 — **this is the score to show or use** |
+| `matched` | `bool` | `iou` passed the enter threshold (with hysteresis); requires `valid` |
+| `valid` | `bool` | false until calibration and a target exist; ignore the score then |
+| `shadow_texture` | `Texture2D` | the detected shadow as a mask (alpha) |
+| `score_received` | `signal(iou: float, matched: bool)` | emitted on every camera frame |
+
+```gdscript
+@onready var _link: VisionLink = $VisionLink
+
+func _ready() -> void:
+    _link.score_received.connect(func(iou, matched): print(iou, matched))
+    # or poll _link.iou in _process
+```
+
+Raw values arrive in the `match` datagram: `iou` (smoothed), `iou_raw` (this frame),
+`coverage` (how much of the target is covered), `overflow` (how much of the shadow lies
+outside the target), `matched`, `valid`. Smoothing, thresholds and hysteresis live in
+`matcher.py` and `config.py`.
+
 `ParticleWall.gd` calls `set_target()` whenever a round starts, and press **C** to show the
 green calibration screen.
 
@@ -154,5 +189,9 @@ green calibration screen.
   dark hole, a shadow falling into it is invisible.
 - The interactive calibration windows (`confirm_corners`, `find_corners_manual`) have still
   never been run; calibration in practice uses `--mode color`.
+- `border_margin` in `config.py` ignores a strip along the edge of the calibrated image.
+  The calibration quad sits on the outermost pixels of the projection, so the warp pulls in
+  a little of the dark wall around it, which would otherwise read as shadow. Raise it if a
+  dark strip still shows up along the edges.
 - No lens-distortion correction; check that the edges look straight after calibrating.
 - Ports are placeholders.

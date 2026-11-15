@@ -3,6 +3,10 @@
 Transport: UDP, one UTF-8 JSON object per datagram.
 
 Godot -> vision
+    calibrate   {"type": "calibrate"}
+        Recalibrate from the next frames. The projector should be showing a plain
+        saturated colour (the game's C screen). Vision keeps trying for ~2 s and answers
+        with calibrate_ack.
     set_target  {"type": "set_target", "target_id": int, "w": int, "h": int,
                  "mask_png_b64": str}
         The target shape in *projected screen coordinates*, as a PNG (base64).
@@ -13,6 +17,7 @@ Godot -> vision
         target_ack arrives (UDP can drop packets).
 
 vision -> Godot
+    calibrate_ack {"type": "calibrate_ack", "ok": bool, "error": str}
     target_ack  {"type": "target_ack", "target_id": int|null, "ok": bool, "error": str}
     match       {"type": "match", "target_id": int|null, "frame_id": int, "t": float,
                  "iou": float, "iou_raw": float, "coverage": float, "overflow": float,
@@ -44,6 +49,11 @@ MAX_DATAGRAM = 60000      # stay below the 65507-byte UDP payload limit
 SHAPE_THRESHOLD = 128     # pixel values below this count as "shape"
 SHADOW_MAX_SIZE = (320, 180)   # sent shadow is downscaled to this: a full-size mask
                                # does not compress well and can exceed the datagram size
+SHADOW_SIZES = ((320, 180), (160, 90))   # tried in order until the message fits
+SHADOW_DILATE_PX = 10     # push the particle outline this far outside the real shadow:
+                          # the edge itself sits in the dark and cannot be seen
+SAFE_DATAGRAM = 8000      # some setups drop UDP datagrams well below the 64 KB limit
+                          # (this machine: anything over ~9 KB fails with EMSGSIZE)
 
 
 def encode_message(msg: Dict[str, Any]) -> bytes:
@@ -69,10 +79,12 @@ def mask_to_png_b64(shape_mask: np.ndarray) -> str:
     return base64.b64encode(buf.tobytes()).decode("ascii")
 
 
-def shadow_to_png_b64(shadow: np.ndarray, max_size: Tuple[int, int] = SHADOW_MAX_SIZE) -> str:
+def shadow_to_png_b64(shadow: np.ndarray, max_size: Tuple[int, int] = SHADOW_MAX_SIZE,
+                      dilate_px: int = SHADOW_DILATE_PX) -> str:
     """Bool shadow mask -> base64 PNG, shadow opaque white, the rest transparent.
 
-    Downscaled to max_size (nearest) so the datagram stays small.
+    Downscaled to max_size (nearest) so the datagram stays small, then grown by dilate_px
+    so the outline the particles gather on sits in the lit area around the shadow.
     """
     shadow = np.asarray(shadow, dtype=bool)
     h, w = shadow.shape
@@ -81,8 +93,12 @@ def shadow_to_png_b64(shadow: np.ndarray, max_size: Tuple[int, int] = SHADOW_MAX
         shadow = cv2.resize(shadow.astype(np.uint8) * 255,
                             (int(w * scale), int(h * scale)),
                             interpolation=cv2.INTER_NEAREST) > 0
+    if dilate_px > 0:
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * dilate_px + 1, 2 * dilate_px + 1))
+        shadow = cv2.dilate(shadow.astype(np.uint8), k) > 0
     rgba = np.zeros((shadow.shape[0], shadow.shape[1], 4), dtype=np.uint8)
-    rgba[shadow] = 255                       # opaque where the shadow is
+    rgba[:, :, 0:3] = 255
+    rgba[shadow, 3] = 255                    # opaque where the shadow is
     ok, buf = cv2.imencode(".png", rgba)
     if not ok:
         raise ValueError("PNG encoding failed")
@@ -138,6 +154,14 @@ def make_ack(target_id: Optional[int], ok: bool, error: str = "") -> Dict[str, A
     return {"type": "target_ack", "target_id": target_id, "ok": bool(ok), "error": error}
 
 
+def make_calibrate() -> Dict[str, Any]:
+    return {"type": "calibrate"}
+
+
+def make_calibrate_ack(ok: bool, error: str = "") -> Dict[str, Any]:
+    return {"type": "calibrate_ack", "ok": bool(ok), "error": error}
+
+
 def make_match(target_id: Optional[int], frame_id: int, t: float, iou: float, iou_raw: float,
                coverage: float, overflow: float, matched: bool, valid: bool,
                shadow: Optional[np.ndarray] = None) -> Dict[str, Any]:
@@ -154,5 +178,17 @@ def make_match(target_id: Optional[int], frame_id: int, t: float, iou: float, io
         "valid": bool(valid),
     }
     if shadow is not None:
-        msg["shadow_png_b64"] = shadow_to_png_b64(shadow)
+        # A busy shadow (background speckle included) can push the message past what the
+        # network accepts. Step the mask resolution down, and drop it if even that fails:
+        # the score matters more than the outline.
+        for size in SHADOW_SIZES:
+            msg["shadow_png_b64"] = shadow_to_png_b64(shadow, size)
+            try:
+                fits = len(encode_message(msg)) <= SAFE_DATAGRAM
+            except ValueError:
+                fits = False
+            if fits:
+                break
+        else:
+            msg.pop("shadow_png_b64", None)
     return msg

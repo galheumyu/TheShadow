@@ -24,6 +24,8 @@ var _transition_elapsed := 0.0
 var _match_held := false
 var _space_held := false
 var _last_shadow: Texture2D
+var _status_text := ""
+var _status_until := 0
 var _valid_image_masks: Array[Texture2D] = []
 
 var _header_label: Label
@@ -31,10 +33,12 @@ var _timer_label: Label
 var _message_label: Label
 var _progress_bar: ProgressBar
 var _prompt_label: Label
+var _score_label: Label
 var _calib_rect: ColorRect
 
 
 func _ready() -> void:
+	_link.calibration_finished.connect(_on_calibration_finished)
 	_collect_image_masks()
 	_build_hud()
 	_apply_target_shape()
@@ -118,6 +122,24 @@ func _toggle_calibration_screen() -> void:
 		_calib_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		layer.add_child(_calib_rect)
 	_calib_rect.visible = not _calib_rect.visible
+	if _calib_rect.visible:
+		_link.request_calibration()
+
+
+func _on_calibration_finished(ok: bool, error: String) -> void:
+	# The green screen always goes away, so pressing C again is always a fresh attempt.
+	if _calib_rect != null:
+		_calib_rect.visible = false
+	if ok:
+		_set_status("Calibrated")
+	else:
+		_set_status("Calibration failed: %s" % error)
+		push_warning("vision: calibration failed (%s)" % error)
+
+
+func _set_status(text: String) -> void:
+	_status_text = text
+	_status_until = Time.get_ticks_msec() + 3000
 
 
 func _start_game() -> void:
@@ -246,6 +268,13 @@ func _build_hud() -> void:
 	_progress_bar.modulate = Color(1.0, 0.82, 0.35, 1.0)
 	root.add_child(_progress_bar)
 
+	_score_label = Label.new()
+	_score_label.position = Vector2(24, 18)
+	_score_label.add_theme_font_size_override("font_size", 20)
+	_score_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.6))
+	_score_label.add_theme_color_override("font_shadow_color", Color(0.0, 0.0, 0.0, 0.9))
+	root.add_child(_score_label)
+
 	_prompt_label = _make_label(root, Control.PRESET_BOTTOM_WIDE, -70.0, -20.0, 18)
 	_prompt_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_prompt_label.add_theme_color_override("font_color", Color(0.78, 0.86, 1.0))
@@ -272,12 +301,13 @@ func _update_hud() -> void:
 		_round_name(_shape_index),
 	]
 	_timer_label.text = "TIME  %02d" % ceili(_time_remaining)
+	_score_label.text = ("SIMILARITY  %.2f" % _link.iou) if _link.valid else "SIMILARITY  --"
 	_progress_bar.value = minf(_match_elapsed, MATCH_HOLD_DURATION)
 
 	match _state:
 		GameState.INTRO:
 			_message_label.text = "Match your shadow to the glowing shape"
-			_prompt_label.text = "Press ENTER to begin  |  SPACE = simulate  |  C = green screen"
+			_prompt_label.text = "Press ENTER to begin  |  SPACE = simulate  |  C = recalibrate"
 			_timer_label.text = ""
 		GameState.PLAYING:
 			_message_label.text = "Hold your shadow in the shape" if _match_held else "Move your shadow into the shape"
@@ -294,3 +324,6 @@ func _update_hud() -> void:
 			_message_label.text = "All shapes matched!"
 			_prompt_label.text = "Press ENTER to play again"
 			_timer_label.text = ""
+
+	if Time.get_ticks_msec() < _status_until:
+		_prompt_label.text = _status_text

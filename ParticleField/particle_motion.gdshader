@@ -7,7 +7,10 @@ shader_type particles;
 uniform sampler2D hole_mask : filter_linear, repeat_disable;
 // Shadow from the vision process (alpha = shadow). Empty until the first frame arrives.
 uniform sampler2D shadow_mask : filter_linear, repeat_disable, hint_default_transparent;
-uniform float shadow_pull_strength : hint_range(0.0, 40.0) = 14.0;
+uniform float shadow_pull_strength : hint_range(0.0, 80.0) = 35.0;
+// How far (in uv) the shader looks around a particle to find the shadow edge. The shadow
+// mask is binary, so this finite difference is what decides how wide the catching band is.
+uniform float shadow_band : hint_range(0.005, 0.1) = 0.03;
 uniform vec2 wall_half_extents = vec2(6.0, 3.5);
 uniform vec3 particle_tint = vec3(0.35, 0.65, 1.0);
 
@@ -52,15 +55,9 @@ float shadow_at(vec2 uv) {
 	if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
 		return 0.0;
 	}
-	return texture(shadow_mask, uv).a;
-}
-
-vec2 shadow_gradient(vec2 uv) {
-	ivec2 sz = textureSize(shadow_mask, 0);
-	vec2 texel = 1.0 / max(vec2(sz), vec2(1.0));
-	float dx = shadow_at(uv + vec2(texel.x, 0.0)) - shadow_at(uv - vec2(texel.x, 0.0));
-	float dy = shadow_at(uv + vec2(0.0, texel.y)) - shadow_at(uv - vec2(0.0, texel.y));
-	return vec2(dx, dy) / (2.0 * texel);
+	// The mask is in screen coordinates (row 0 = top), while wall uv has v = 0 at the
+	// bottom. The hole mask does not need this: it was built with the same convention.
+	return texture(shadow_mask, vec2(uv.x, 1.0 - uv.y)).a;
 }
 
 vec2 mask_gradient(vec2 uv) {
@@ -199,17 +196,19 @@ void process() {
 		float into_hole = min(dot(vel, n), 0.0);
 		vel -= into_hole * n * max(near_hole, W);
 
-		// --- Shadow contour: pull particles onto the 0.5 level set of the shadow ---
+		// --- Shadow contour: pull particles onto the edge of the shadow ---
 		// Inside the shadow the pull points out, outside it points in, so particles
-		// gather on the outline instead of filling or avoiding it. The gradient weight
-		// keeps the force local: particles far from the shadow are left alone.
-		vec2 s_grad = shadow_gradient(uv);
-		float s_mag = length(s_grad);
-		if (s_mag > 1e-3) {
-			vec2 s_n = s_grad / s_mag;
-			float s_val = shadow_at(uv);
-			float edge = smoothstep(1.0, 4.0, s_mag);
-			vel += s_n * (0.5 - s_val) * shadow_pull_strength * edge * DELTA;
+		// gather on the outline instead of filling or avoiding it. The difference is
+		// sampled shadow_band apart rather than one texel apart: with a binary mask that
+		// widens the band where a particle can feel the shadow at all.
+		float s_here = shadow_at(uv);
+		vec2 s_diff = vec2(
+			shadow_at(uv + vec2(shadow_band, 0.0)) - shadow_at(uv - vec2(shadow_band, 0.0)),
+			shadow_at(uv + vec2(0.0, shadow_band)) - shadow_at(uv - vec2(0.0, shadow_band))
+		);
+		float s_mag = length(s_diff);
+		if (s_mag > 1e-4) {
+			vel += (s_diff / s_mag) * (0.5 - s_here) * shadow_pull_strength * DELTA;
 		}
 
 		vel *= exp(-damping * DELTA);

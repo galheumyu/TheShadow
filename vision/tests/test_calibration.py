@@ -3,9 +3,11 @@ import os
 import tempfile
 import unittest
 
+import cv2
 import numpy as np
 
-from vision.calibration import Calibration, find_corners_auto, order_corners
+from vision.calibration import (Calibration, find_corners_auto, find_corners_auto_color,
+                                order_corners)
 from vision.frame_source import SyntheticSource
 
 
@@ -29,6 +31,19 @@ class AutoCornersTest(unittest.TestCase):
         corners = find_corners_auto(src.read())
         self.assertIsNotNone(corners)
         self.assertLess(np.abs(corners - src.corners).max(), 5.0)
+
+    def test_finds_colored_screen(self):
+        frame = np.full((360, 640, 3), 60, dtype=np.uint8)      # grey wall, no saturation
+        quad = np.array([[80, 60], [560, 70], [540, 300], [60, 290]], dtype=np.int32)
+        cv2.fillPoly(frame, [quad], (0, 255, 0))                # the game's green screen
+        corners = find_corners_auto_color(frame)
+        self.assertIsNotNone(corners)
+        for got, want in zip(corners, order_corners(quad)):
+            self.assertLess(np.linalg.norm(got - want), 3.0)
+
+    def test_color_needs_a_colored_area(self):
+        frame = np.full((360, 640, 3), 60, dtype=np.uint8)
+        self.assertIsNone(find_corners_auto_color(frame))
 
     def test_rejects_uniform_frame(self):
         self.assertIsNone(find_corners_auto(np.full((540, 960, 3), 40, np.uint8)))

@@ -19,11 +19,15 @@ class ShadowSegmenter:
     """
 
     def __init__(self, threshold: int = 60, blur_ksize: int = 5, open_ksize: int = 5,
-                 close_ksize: int = 7):
+                 close_ksize: int = 7, border_margin: int = 0):
         self.threshold = int(threshold)
         self.blur_ksize = _odd(blur_ksize, "blur_ksize")
         self.open_ksize = int(open_ksize)
         self.close_ksize = int(close_ksize)
+        # The calibration quad sits on the outermost pixels of the projected area, so the
+        # warp picks up a strip of the dark wall around it. Ignoring that margin keeps the
+        # strip out of the shadow mask.
+        self.border_margin = max(0, int(border_margin))
 
     def segment(self, screen_img: np.ndarray) -> np.ndarray:
         """Return a bool mask (h, w), True where there is shadow."""
@@ -37,4 +41,11 @@ class ShadowSegmenter:
         if self.close_ksize > 1:
             k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (self.close_ksize, self.close_ksize))
             mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k)
-        return mask > 0
+        shadow = mask > 0
+        m = self.border_margin
+        if m > 0:
+            shadow[:m, :] = False
+            shadow[-m:, :] = False
+            shadow[:, :m] = False
+            shadow[:, -m:] = False
+        return shadow

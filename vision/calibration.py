@@ -137,21 +137,37 @@ def find_corners_auto(frame: np.ndarray, min_area_ratio: float = 0.05,
     return _quad_from_binary(binary, "bright area", min_area_ratio, border_margin)
 
 
-def find_corners_auto_color(frame: np.ndarray, min_saturation: int = 100,
-                            min_value: int = 100, min_area_ratio: float = 0.05,
+def find_corners_auto_color(frame: np.ndarray, hue_range: Tuple[int, int] = (35, 90),
+                            min_saturation: int = 100, min_value: int = 100,
+                            min_area_ratio: float = 0.05, min_fill: float = 0.85,
                             border_margin: int = 2) -> Optional[np.ndarray]:
-    """Find a colored (saturated) projected area, e.g. the green calibration screen.
+    """Find the green calibration screen.
 
-    A colored screen is much easier to separate from a white wall lit by a lamp than a
-    white one: the wall has low saturation whatever its brightness is.
+    A saturated screen is much easier to separate from a white wall lit by a lamp than a
+    white one: the wall has low saturation whatever its brightness is. The hue gate keeps
+    other coloured things in the room (clothes, the lamp) from being picked up, and the
+    fill ratio rejects a screen that is partly hidden behind the player.
     """
     if frame.ndim != 3:
         raise ValueError("color calibration needs a BGR frame")
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    mask = ((hsv[:, :, 1] >= min_saturation) & (hsv[:, :, 2] >= min_value)).astype(np.uint8) * 255
+    hue, sat, val = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+    mask = ((hue >= hue_range[0]) & (hue <= hue_range[1]) &
+            (sat >= min_saturation) & (val >= min_value)).astype(np.uint8) * 255
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-    return _quad_from_binary(mask, "colored area", min_area_ratio, border_margin)
+    corners = _quad_from_binary(mask, "green area", min_area_ratio, border_margin)
+    if corners is None:
+        return None
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    largest = max(contours, key=cv2.contourArea)
+    quad_area = cv2.contourArea(corners.astype(np.float32))
+    fill = cv2.contourArea(largest) / quad_area if quad_area > 0 else 0.0
+    if fill < min_fill:
+        log.info("auto calibration: green area only fills %.0f%% of its quad "
+                 "(something is in the way?)", 100 * fill)
+        return None
+    return corners
 
 
 def _draw_quad(img: np.ndarray, pts, color=(0, 255, 0)) -> None:

@@ -98,11 +98,12 @@ def cmd_run(args: argparse.Namespace) -> int:
         log.warning("no calibration file at %s; results will be invalid. "
                     "Run 'calibrate' first.", args.calibration)
 
-    segmenter = ShadowSegmenter(cfg.threshold, cfg.blur_ksize, cfg.open_ksize, cfg.close_ksize)
+    segmenter = ShadowSegmenter(cfg.threshold, cfg.blur_ksize, cfg.open_ksize,
+                                cfg.close_ksize, cfg.border_margin)
     tracker = MatchTracker(cfg.match_enter, cfg.match_exit, cfg.iou_smoothing)
     transport = UdpTransport(cfg.listen_addr, cfg.godot_addr)
     pipeline = VisionPipeline(source, calib, segmenter, tracker, transport,
-                              cfg.work_size, cfg.target_fps)
+                              cfg.work_size, cfg.target_fps, args.calibration)
     log.info("listening on %s:%d, sending to %s:%d", cfg.listen_addr[0],
              transport.listen_port, cfg.godot_addr[0], cfg.godot_addr[1])
 

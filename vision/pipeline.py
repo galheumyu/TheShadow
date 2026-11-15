@@ -9,10 +9,10 @@ from typing import Callable, Optional, Tuple
 import cv2
 import numpy as np
 
-from .calibration import Calibration
+from .calibration import Calibration, find_corners_auto_color
 from .frame_source import FrameSource
 from .matcher import MatchTracker, compute_scores
-from .protocol import make_ack, make_match, parse_set_target
+from .protocol import make_ack, make_calibrate_ack, make_match, parse_set_target
 from .segmenter import ShadowSegmenter
 from .transport import UdpTransport
 
@@ -30,7 +30,7 @@ class VisionPipeline:
     def __init__(self, source: FrameSource, calibration: Optional[Calibration],
                  segmenter: ShadowSegmenter, tracker: MatchTracker,
                  transport: UdpTransport, work_size: Tuple[int, int] = (640, 360),
-                 target_fps: float = 30.0):
+                 target_fps: float = 30.0, calibration_path: Optional[str] = None):
         self.source = source
         self.calibration = calibration
         self.segmenter = segmenter
@@ -41,6 +41,11 @@ class VisionPipeline:
         self.target_id: Optional[int] = None
         self.target_mask: Optional[np.ndarray] = None     # bool (h, w) at work_size
         self.frame_id = 0
+        self.calibration_path = calibration_path
+        self._calibrate_until = 0.0     # nonzero while a calibrate request is pending
+        self._calibrate_prev: Optional[np.ndarray] = None
+        self._calibrate_hits = 0
+        self._last_log = 0.0
         self._t0 = time.monotonic()
 
     def _handle_messages(self) -> None:
@@ -48,6 +53,12 @@ class VisionPipeline:
             kind = msg.get("type")
             if kind == "set_target":
                 self._handle_set_target(msg)
+            elif kind == "calibrate":
+                # The projector needs a frame or two to switch to the colour screen.
+                self._calibrate_until = time.monotonic() + 3.0
+                self._calibrate_prev = None
+                self._calibrate_hits = 0
+                log.info("calibration requested")
             else:
                 log.debug("ignoring message of type %r", kind)
 
@@ -74,12 +85,53 @@ class VisionPipeline:
         self.transport.send(make_ack(target_id, True))
         log.info("target %d set (%d shape pixels)", target_id, int(mask.sum()))
 
+    def _try_calibrate(self, frame: np.ndarray) -> None:
+        """Calibrate from a camera frame showing the coloured screen, or give up.
+
+        The corners have to stay put for a few frames before they are accepted, so a
+        frame caught mid-transition (or a hand moving through the shot) does not get
+        baked into the calibration.
+        """
+        h, w = frame.shape[:2]
+        corners = find_corners_auto_color(frame)
+        if corners is None:
+            self._calibrate_prev = None
+            self._calibrate_hits = 0
+            if time.monotonic() > self._calibrate_until:
+                self._calibrate_until = 0.0
+                log.warning("calibration failed: no coloured screen in view")
+                self.transport.send(make_calibrate_ack(False, "no coloured screen in view"))
+            return
+        if self._calibrate_prev is not None and \
+                np.abs(corners - self._calibrate_prev).max() < 8.0:
+            self._calibrate_hits += 1
+        else:
+            self._calibrate_hits = 1
+        self._calibrate_prev = corners
+        if self._calibrate_hits < 3:
+            return
+        self._calibrate_until = 0.0
+        self.calibration = Calibration(corners=corners, camera_size=(w, h))
+        if self.calibration_path:
+            self.calibration.save(self.calibration_path)
+        self.tracker.reset()
+        self.transport.send(make_calibrate_ack(True))
+        log.info("calibrated from the colour screen (%dx%d)", w, h)
+
     def step(self) -> Optional[StepResult]:
         """Process one camera frame. Returns None if the camera gave no frame."""
         self._handle_messages()
         frame = self.source.read()
         if frame is None:
+            if self._calibrate_until and time.monotonic() > self._calibrate_until:
+                self._calibrate_until = 0.0
+                self.transport.send(make_calibrate_ack(False, "no camera frame"))
             return None
+
+        if self._calibrate_until:
+            self._try_calibrate(frame)
+            if self._calibrate_until:
+                return None     # still looking for the colour screen
         self.frame_id += 1
         t = time.monotonic() - self._t0
 
@@ -96,6 +148,11 @@ class VisionPipeline:
         screen = self.calibration.warp(frame, self.work_size)
         shadow = self.segmenter.segment(screen)
         scores = compute_scores(shadow, self.target_mask)
+        now = time.monotonic()
+        if now - self._last_log > 2.0:
+            self._last_log = now
+            log.info("shadow %.1f%%  iou %.2f  coverage %.2f  overflow %.2f",
+                     100.0 * shadow.mean(), scores.iou, scores.coverage, scores.overflow)
         iou_smoothed, matched = self.tracker.update(scores.iou)
         result = make_match(self.target_id, self.frame_id, t, iou_smoothed, scores.iou,
                             scores.coverage, scores.overflow, matched, True, shadow)

@@ -15,8 +15,15 @@ class_name VisionLink
 ## Draw the detected shadow over the screen (debug). The particle wall already
 ## shows the shadow outline, so this is off by default.
 @export var show_overlay := false
+## Start the vision process with the game and stop it on exit.
+@export var autostart := true
+@export var vision_source := "webcam:0"
+@export var vision_size := "1280x720"
+## Show vision's own debug window (calibrated image, shadow, threshold slider).
+@export var show_debug_window := true
 
 signal score_received(iou: float, matched: bool)
+signal calibration_finished(ok: bool, error: String)
 
 var iou := 0.0
 var matched := false
@@ -30,6 +37,7 @@ var _acked := true
 var _resend_in := 0.0
 var _overlay: TextureRect
 var _label: Label
+var _vision_pid := -1
 
 
 func _ready() -> void:
@@ -38,6 +46,37 @@ func _ready() -> void:
 		push_error("VisionLink: cannot listen on port %d" % listen_port)
 	if show_overlay:
 		_build_overlay()
+	if autostart:
+		_start_vision()
+
+
+func _exit_tree() -> void:
+	if _vision_pid > 0:
+		OS.kill(_vision_pid)
+
+
+func _start_vision() -> void:
+	# Runs the repo's .venv interpreter from the project folder; the process log ends up
+	# in user://vision.log.
+	var dir := ProjectSettings.globalize_path("res://")
+	var python := dir.path_join(".venv/bin/python")
+	if not FileAccess.file_exists(python):
+		push_warning("VisionLink: no python at %s; start vision by hand" % python)
+		return
+	var args := "-m vision.main run --source %s --size %s" % [vision_source, vision_size]
+	if show_debug_window:
+		args += " --show"
+	var cmd := 'cd "%s" && exec "%s" %s >> "%s" 2>&1' % [
+		dir, python, args, ProjectSettings.globalize_path("user://vision.log")]
+	_vision_pid = OS.create_process("/bin/sh", ["-c", cmd])
+	if _vision_pid <= 0:
+		push_warning("VisionLink: could not start the vision process")
+
+
+## Ask vision to recalibrate; it answers with calibration_finished.
+func request_calibration() -> void:
+	_socket.set_dest_address(vision_host, vision_port)
+	_socket.put_packet(JSON.stringify({"type": "calibrate"}).to_utf8_buffer())
 
 
 func _process(delta: float) -> void:
@@ -76,6 +115,8 @@ func _receive() -> void:
 		if msg.get("type") == "target_ack":
 			if int(msg.get("target_id", -1)) == _target_id:
 				_acked = true
+		elif msg.get("type") == "calibrate_ack":
+			calibration_finished.emit(bool(msg.get("ok", false)), str(msg.get("error", "")))
 		elif msg.get("type") == "match":
 			_apply_match(msg)
 

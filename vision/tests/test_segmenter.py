@@ -28,6 +28,14 @@ class SegmenterTest(unittest.TestCase):
         self.assertFalse(ShadowSegmenter(threshold=60).segment(self.img).any())
         self.assertTrue(ShadowSegmenter(threshold=120).segment(self.img).any())
 
+    def test_border_margin_clears_the_edges(self):
+        dark = np.zeros((100, 100, 3), dtype=np.uint8)      # all "shadow"
+        mask = ShadowSegmenter(threshold=60, border_margin=10).segment(dark)
+        self.assertFalse(mask[:10, :].any())
+        self.assertFalse(mask[:, :10].any())
+        self.assertFalse(mask[:, -10:].any())
+        self.assertTrue(mask[10:-10, 10:-10].all())
+
     def test_even_blur_kernel_rejected(self):
         with self.assertRaises(ValueError):
             ShadowSegmenter(blur_ksize=4)

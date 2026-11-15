@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 
 from vision.calibration import Calibration, find_corners_auto
-from vision.frame_source import SyntheticSource
+from vision.frame_source import FrameSource, SyntheticSource
 from vision.matcher import MatchTracker
 from vision.pipeline import VisionPipeline
 from vision.protocol import decode_message, encode_message, make_set_target
@@ -16,6 +16,16 @@ from vision.shapes import make_shape_mask, shift_mask
 from vision.transport import UdpTransport
 
 WORK = (640, 360)
+
+
+class GreenScreenSource(FrameSource):
+    """Camera looking at the game's green calibration screen."""
+
+    def read(self):
+        frame = np.full((540, 960, 3), 60, dtype=np.uint8)
+        quad = np.array([[120, 90], [840, 100], [820, 450], [100, 440]], dtype=np.int32)
+        cv2.fillPoly(frame, [quad], (0, 255, 0))
+        return frame
 
 
 class PipelineTest(unittest.TestCase):
@@ -80,7 +90,10 @@ class PipelineTest(unittest.TestCase):
         img = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
         expected = cv2.resize(out.shadow.astype(np.uint8) * 255, (320, 180),
                               interpolation=cv2.INTER_NEAREST) > 0
-        self.assertTrue(np.array_equal(img[:, :, 3] > 0, expected))
+        level = img[:, :, 3] > 127
+        self.assertTrue(level[expected].all())     # outline is grown outward, never cut
+        iou = np.count_nonzero(level & expected) / np.count_nonzero(level | expected)
+        self.assertGreater(iou, 0.6)
         self.assertGreater(np.count_nonzero(out.shadow & shadow) / np.count_nonzero(shadow), 0.9)
 
     def test_no_shadow_png_when_invalid(self):
@@ -140,6 +153,22 @@ class PipelineTest(unittest.TestCase):
         self.send_target(1, "circle")
         out = self.step_until_target(pipeline)
         self.assertFalse(out.result["valid"])
+
+    def test_calibrate_request_is_answered(self):
+        transport = UdpTransport(("127.0.0.1", 0), self.godot.getsockname())
+        pipeline = VisionPipeline(GreenScreenSource(), None, ShadowSegmenter(),
+                                  MatchTracker(), transport, WORK)
+        self.godot.sendto(encode_message({"type": "calibrate"}),
+                          ("127.0.0.1", transport.listen_port))
+        for _ in range(50):
+            pipeline.step()
+            if any(m["type"] == "calibrate_ack" for m in self.drain()):
+                break
+            time.sleep(0.01)
+        else:
+            self.fail("no calibrate_ack")
+        self.assertIsNotNone(pipeline.calibration)
+        transport.close()
 
     def test_new_target_resets_tracking(self):
         self.source.set_shadow(make_shape_mask("circle", WORK))

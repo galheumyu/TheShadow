@@ -19,6 +19,8 @@ class Config:
     blur_ksize: int = 5        # odd; 1 disables
     open_ksize: int = 5        # removes small specks
     close_ksize: int = 7       # fills small holes
+    border_margin: int = 12    # pixels ignored along the edge of the calibrated image
+                               # (the warp picks up a strip of wall outside the projection)
 
     # Match decision (PLACEHOLDER values).
     iou_smoothing: float = 0.5   # EMA alpha in (0, 1]; 1.0 = no smoothing

@@ -2,6 +2,9 @@
 .godot/
 .nomedia
 
+# Python virtual environment for the vision process
+.venv/
+
 # Godot-specific ignores
 .import/
 export.cfg
