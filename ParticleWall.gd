@@ -78,7 +78,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	if event.keycode == KEY_SPACE:
-		_space_held = event.pressed and not event.echo and _state == GameState.PLAYING
+		if event.echo:
+			return      # holding the key repeats it; only the press and the release matter
+		_space_held = event.pressed and _state == GameState.PLAYING
 		return
 
 	if not event.pressed or event.echo:

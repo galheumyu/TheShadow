@@ -20,7 +20,8 @@ class_name VisionLink
 @export var vision_source := "webcam:0"
 @export var vision_size := "1280x720"
 ## Show vision's own debug window (calibrated image, shadow, threshold slider).
-@export var show_debug_window := true
+## Off by default: that window takes the keyboard focus away from the game.
+@export var show_debug_window := false
 
 signal score_received(iou: float, matched: bool)
 signal calibration_finished(ok: bool, error: String)
@@ -95,6 +96,10 @@ func set_target(mask: Texture2D, id: int) -> void:
 	# The wall fills the screen: stretching the square wall texture to the screen
 	# aspect gives the shape as the camera sees it.
 	image.resize(mask_size.x, mask_size.y, Image.INTERPOLATE_BILINEAR)
+	# The wall's own mask textures have row 0 at the bottom of the wall; the shadow the
+	# camera measures is in screen coordinates (row 0 at the top). Without this flip a
+	# triangle scores against its own mirror image.
+	image.flip_y()
 	_target_id = id
 	_target_packet = JSON.stringify({
 		"type": "set_target",
